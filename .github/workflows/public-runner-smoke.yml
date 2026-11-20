@@ -1,11 +1,19 @@
-# Public standard-runner availability test; manual dispatch only.
-# No checkout, secrets, private code, network access, or deployment.
+# Public-only automatic CI: no checkout of private code, real business data, or secrets.
+# The MariaDB service and known CI-only password are disposable synthetic fixtures.
 name: Public runner smoke test
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: public-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   public-runner-smoke:
@@ -28,6 +36,108 @@ jobs:
 
               def test_standard_library(self):
                   self.assertEqual(sorted(["b", "a"]), ["a", "b"])
+
+          if __name__ == "__main__":
+              unittest.main(verbosity=2)
+          PY
+
+  mariadb-transaction-smoke:
+    name: Disposable MariaDB / synthetic SQL transactions
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: synthetic-ci-password-not-a-secret
+          MARIADB_ROOT_HOST: "%"
+          MARIADB_DATABASE: synthetic_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - name: Install pinned public Python database client
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'PyMySQL==1.1.1'
+
+      - name: Check transaction rollback and duplicate prevention on synthetic data
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          CI_DB_HOST: "127.0.0.1"
+          CI_DB_PORT: "3306"
+          CI_DB_USER: "root"
+          CI_DB_PASSWORD: "synthetic-ci-password-not-a-secret"
+          CI_DB_NAME: "synthetic_ci"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import unittest
+          import pymysql
+
+          class MariaDBSmokeTests(unittest.TestCase):
+              @classmethod
+              def setUpClass(cls):
+                  cls.db = pymysql.connect(
+                      host=os.environ["CI_DB_HOST"],
+                      port=int(os.environ["CI_DB_PORT"]),
+                      user=os.environ["CI_DB_USER"],
+                      password=os.environ["CI_DB_PASSWORD"],
+                      database=os.environ["CI_DB_NAME"],
+                      autocommit=False,
+                      connect_timeout=10,
+                  )
+                  with cls.db.cursor() as cursor:
+                      cursor.execute(
+                          "CREATE TABLE synthetic_operations ("
+                          "reference_id VARCHAR(60) PRIMARY KEY, "
+                          "quantity INT NOT NULL"
+                          ") ENGINE=InnoDB"
+                      )
+                  cls.db.commit()
+
+              @classmethod
+              def tearDownClass(cls):
+                  cls.db.close()
+
+              def tearDown(self):
+                  self.db.rollback()
+
+              def count_rows(self):
+                  with self.db.cursor() as cursor:
+                      cursor.execute("SELECT COUNT(*) FROM synthetic_operations")
+                      return cursor.fetchone()[0]
+
+              def test_rollback_discards_synthetic_movement(self):
+                  with self.db.cursor() as cursor:
+                      cursor.execute(
+                          "INSERT INTO synthetic_operations VALUES (%s, %s)",
+                          ("synthetic-rollback", 3),
+                      )
+                  self.assertEqual(self.count_rows(), 1)
+                  self.db.rollback()
+                  self.assertEqual(self.count_rows(), 0)
+
+              def test_duplicate_reference_is_rejected(self):
+                  with self.db.cursor() as cursor:
+                      cursor.execute(
+                          "INSERT INTO synthetic_operations VALUES (%s, %s)",
+                          ("synthetic-duplicate", 1),
+                      )
+                      with self.assertRaises(pymysql.err.IntegrityError):
+                          cursor.execute(
+                              "INSERT INTO synthetic_operations VALUES (%s, %s)",
+                              ("synthetic-duplicate", 2),
+                          )
+                  self.db.rollback()
+                  self.assertEqual(self.count_rows(), 0)
 
           if __name__ == "__main__":
               unittest.main(verbosity=2)
