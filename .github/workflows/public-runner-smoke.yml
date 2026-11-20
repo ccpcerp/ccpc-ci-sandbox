@@ -1,0 +1,34 @@
+# Public standard-runner availability test; manual dispatch only.
+# No checkout, secrets, private code, network access, or deployment.
+name: Public runner smoke test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  public-runner-smoke:
+    name: Public standard runner / Python smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Execute two self-contained Python standard-library tests
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import unittest
+
+          class PublicSmokeTests(unittest.TestCase):
+              def test_python_arithmetic(self):
+                  self.assertEqual(2 + 2, 4)
+
+              def test_standard_library(self):
+                  self.assertEqual(sorted(["b", "a"]), ["a", "b"])
+
+          if __name__ == "__main__":
+              unittest.main(verbosity=2)
+          PY
