@@ -50,7 +50,7 @@ echo "Generating Frappe bench shared configuration"
 echo "Installing a synthetic ERPNext v16 site in disposable volumes"
 "${compose[@]}" run --rm --no-deps backend bash -c '
   set -euo pipefail
-  bench new-site ci.localhost \
+  bench new-site \
     --mariadb-user-host-login-scope="%" \
     --admin-password="public-ci-only-not-a-secret" \
     --db-root-username=root \
