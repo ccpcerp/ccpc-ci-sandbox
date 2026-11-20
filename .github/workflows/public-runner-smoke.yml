@@ -142,3 +142,20 @@ jobs:
           if __name__ == "__main__":
               unittest.main(verbosity=2)
           PY
+
+  frappe-erpnext-smoke:
+    name: Disposable public Frappe/ERPNext v16 / real SQL
+    # Don't run heavy jobs from untrusted fork PRs. Private code never used.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout only this public CI sandbox (no private repositories)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install public ERPNext v16 and verify synthetic site and database
+        shell: bash
+        run: bash ci/run-frappe-smoke.sh
