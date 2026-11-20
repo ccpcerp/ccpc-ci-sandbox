@@ -1,0 +1,93 @@
+# Disposable public-source-only Frappe/ERPNext site for GitHub-hosted CI.
+# Derived from public frappe/frappe_docker pwd.yml; intentionally no frontend,
+# host-published ports, private source, host paths, credentials, or persistence.
+services:
+  db:
+    image: mariadb:11.8
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --innodb-snapshot-isolation=OFF
+    environment:
+      MARIADB_ROOT_PASSWORD: "public-ci-only-not-a-secret"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 2g
+    volumes:
+      - db-data:/var/lib/mysql
+    networks:
+      - ci-internal
+
+  redis-cache:
+    image: redis:6.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 256m
+    networks:
+      - ci-internal
+
+  redis-queue:
+    image: redis:6.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 256m
+    networks:
+      - ci-internal
+
+  configurator:
+    image: frappe/erpnext:v16.60.0
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        set -euo pipefail;
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host $$DB_HOST;
+        bench set-config -gp db_port $$DB_PORT;
+        bench set-config -g redis_cache "redis://$$REDIS_CACHE";
+        bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
+        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
+        bench set-config -gp socketio_port $$SOCKETIO_PORT;
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      SOCKETIO_PORT: "9000"
+    mem_limit: 1g
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    networks:
+      - ci-internal
+
+  backend:
+    image: frappe/erpnext:v16.60.0
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+    mem_limit: 4g
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    networks:
+      - ci-internal
+
+volumes:
+  db-data:
+  sites:
+  logs:
+
+networks:
+  ci-internal:
+    internal: true
