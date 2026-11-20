@@ -66,11 +66,14 @@ grep -Eq '(^|[[:space:]])frappe([[:space:]]|$)' <<< "$apps_output"
 grep -Eq '(^|[[:space:]])erpnext([[:space:]]|$)' <<< "$apps_output"
 
 echo "Reading only the disposable database name from synthetic site configuration"
-db_name=$("${compose[@]}" run --rm --no-deps backend python3 -c '
+db_name_output=$("${compose[@]}" run --rm --no-deps backend python3 -c '
 import json
 with open("sites/ci.localhost/site_config.json", encoding="utf-8") as f:
     print(json.load(f)["db_name"])
 ')
+# Official Frappe image emits "Linking fresh assets to volume..." on stdout
+# before Python prints the database name; extract only the final result line.
+db_name=$(printf '%s\n' "$db_name_output" | tail -n 1 | tr -d '\r')
 if [[ ! "$db_name" =~ ^[A-Za-z0-9_]+$ ]]; then
   echo "::error::Unexpected CI database name" >&2
   exit 1
